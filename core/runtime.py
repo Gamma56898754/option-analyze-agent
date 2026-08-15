@@ -1,5 +1,6 @@
 from data.browser_session import BrowserSession
 from data.optionchart_client import OptionChartClient
+from cache.option_chain_cache import OptionChainCache
 
 
 class Runtime:
@@ -18,6 +19,8 @@ class Runtime:
         self.browser_session = BrowserSession()
 
         self.client = None
+
+        self.option_chain_cache = OptionChainCache()
 
         self._initialize_client()
 

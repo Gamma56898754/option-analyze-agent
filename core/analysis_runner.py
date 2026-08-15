@@ -60,7 +60,8 @@ class AnalysisRunner:
         option_chain_result = (
             self.option_chain_tool.run(
                 ticker=request.ticker,
-                expiration_date=request.expiration
+                expiration_date=request.expiration,
+                force_refresh=request.force_refresh,
             )
         )
 

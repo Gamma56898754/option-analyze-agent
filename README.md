@@ -1,121 +1,173 @@
 # Option Analyze Agent
 
-An educational options-analysis agent that turns a natural-language request into a validated analysis workflow. It retrieves an option chain, performs deterministic GEX, DEX, open-interest, and max-pain calculations, then uses an LLM to explain the calculated output.
+An LLM-powered options analysis agent that retrieves option-chain data, runs deterministic GEX / DEX / OI / Max Pain calculations, and explains the results in natural language.
 
-> **Project status:** V1 — a linear, single-request command-line workflow. LangGraph orchestration, persistence, caching, native tool calling, and MCP exposure are planned improvements.
+The project is currently at the **LangGraph V2** milestone: it supports a stateful CLI conversation, persistent checkpoints, short-term memory summarization, option-chain caching, natural-language date handling, and controlled error routing.
 
-## Why this project
+> Educational and research use only. This project is not financial advice.
 
-LLMs are useful for interpreting a user's request and explaining results, but they should not invent market data or perform unverified financial calculations. This project separates those responsibilities:
+## Features
 
-- The **LLM** converts user language into a constrained request and explains supplied calculation results.
-- **Typed schemas, validators, data tools, and analyzers** fetch, parse, validate, and calculate deterministic outputs.
+- Fetches option-chain and expiration data from OptionCharts.
+- Reuses a Playwright-created browser session and a `requests.Session` client during one application run.
+- Runs deterministic analyses for:
+  - Gamma Exposure (GEX)
+  - Delta Exposure (DEX)
+  - Open Interest (OI)
+  - Max Pain
+- Uses an LLM to convert natural-language requests into a validated `AnalysisRequest` and to explain calculated results.
+- Supports a LangGraph workflow with validation, conditional routing, error handling, memory updates, and summarization.
+- Persists LangGraph checkpoints in SQLite so the conversation can resume after restarting the CLI.
+- Keeps recent raw conversation turns plus a compressed running summary.
+- Reuses parsed `OptionChainResult` data for five minutes per `ticker + expiration` key.
+- Supports explicit refresh requests that bypass the option-chain cache.
+- Recognizes selected date expressions using the New York market date:
+  - `today` / `今天`
+  - `tomorrow` / `明天`
+  - `this Friday` / `本周五`
+  - `next Friday` / `下周五`
+- Converts unavailable expirations into a user-facing response with real alternative expiration dates from the data source.
 
-## Current capabilities
 
-- Browser-session and HTTP-client reuse during an application run.
-- Option expiration resolution and validation.
-- HTML option-chain parsing into typed option-contract schemas.
-- Deterministic Gamma Exposure (GEX) analysis.
-- Deterministic Delta Exposure (DEX) analysis.
-- Open Interest (OI) analysis.
-- Max Pain analysis.
-- Natural-language request parsing into `AnalysisRequest`.
-- Request validation before analysis tools run.
-- Structured result formatting before LLM interpretation.
 
 ## Architecture
 
 ```text
 User input
-  -> LLMAgent: convert language to AnalysisRequest
-  -> RequestValidator
-  -> AnalysisRunner
-       -> OptionChainTool
-       -> GEX / DEX / OI / MaxPain tools
-  -> ResultFormatter
-  -> LLMAgent: explain calculated results
+  -> parse_request
+  -> validate_request
+  -> conditional routing
+       -> run_analysis
+            -> format_result
+            -> generate_answer
+       -> generate_answer (explain an existing result)
+       -> validation_failed
+  -> update_short_term_memory
+  -> summarize_conversation (when needed)
 ```
 
+`run_analysis` has its own controlled branch:
+
 ```text
-data/       Browser session, option-data client, HTML parser
-schemas/    Typed request, market, option-chain, and analysis-result objects
-analysis/   Deterministic GEX, DEX, OI, and Max Pain calculations
-tools/      Interfaces around data access and analyzers
-core/       Runtime resource ownership, request validation, orchestration
-agent/      LLM request parsing and result explanation
-test/       Local executable checks and integration scripts
+run_analysis
+  -> success -> format_result -> generate_answer
+  -> expiration unavailable -> analysis_failed -> user guidance
 ```
+
+
+
+### Main modules
+
+```text
+agent/      LLM request parsing, result explanation, formatting
+analysis/   Deterministic GEX, DEX, OI, and Max Pain calculations
+cache/      In-memory OptionChainResult cache with a 5-minute TTL
+core/       Runtime, validation, runner, and domain exceptions
+data/       Browser bootstrap, OptionCharts HTTP client, HTML parser
+graph/      LangGraph state, nodes, routes, and graph assembly
+memory/     Local SQLite checkpoint database created at runtime
+schemas/    Dataclasses shared across the application
+tools/      Data acquisition, date resolution, and analysis tools
+test/       Offline unit tests and integration-oriented test scripts
+```
+
+
 
 ## Requirements
 
 - Python 3.12+
-- A DeepSeek API key
+- A DeepSeek API key compatible with the OpenAI Python SDK
 - Playwright Chromium browser binaries
-- Access to the external option-data source used by `OptionChartClient`
 
-## Setup
-
-From the repository root in Windows PowerShell:
+Install dependencies:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 playwright install chromium
-Copy-Item .env.example .env
 ```
 
-Open `.env` and set your own API key:
+Create a `.env` file in the project root:
 
-```text
-DEEPSEEK_API_KEY=your_key_here
+```env
+DEEPSEEK_API_KEY=your_api_key_here
 ```
 
-Never commit `.env`, browser cookies, sessions, or account data.
+Do not commit `.env`, `venv/`, or the local SQLite memory database.
 
 ## Run
 
 ```powershell
-python test/test_llm_agent.py
+python -m run_graph_agent
 ```
 
-V1 accepts one user request, prints one answer, and exits. It does not yet provide multi-turn conversation memory or cross-run persistence.
-
-Example request:
+Example requests:
 
 ```text
-Analyze TSLA GEX and open interest for 2026-08-21.
+分析 TSLA 2026-08-21 的 GEX 和 DEX
+分析特斯拉下周五的信息
+再帮我看一下 OI 并分析
+再详细解释一下
+更新一下数据，再次分析
 ```
 
-## Local verification
+Use `exit`, `quit`, or `退出` to close the CLI cleanly.
 
-Run from the repository root:
+## Memory and Cache Behavior
+
+
+
+### Conversation memory
+
+LangGraph checkpoints are stored in:
+
+```text
+memory/option_agent_checkpoints.db
+```
+
+The default CLI uses the `local-option-session` thread ID. With the same thread ID, the agent can recover its recent conversation, running summary, and last successful structured request after restart.
+
+When raw conversation history reaches 12 messages, the agent summarizes older turns and keeps the most recent four raw messages. The summary reduces the context sent to the request-parsing LLM; old checkpoints may still remain in SQLite for recovery and debugging.
+
+### Option-chain cache
+
+The in-memory cache key is:
+
+```text
+ticker + expiration
+```
+
+Normal repeated analysis requests within five minutes reuse the parsed option chain. The cache is intentionally cleared when the Python process exits so a new run defaults to freshly retrieved market data.
+
+Requests that explicitly ask to refresh, fetch the latest data, or re-fetch the option chain set `force_refresh=True` and bypass the cache.
+
+## Tests
+
+The following tests run offline: they do not call DeepSeek, launch a browser, use cookies, or request OptionCharts.
 
 ```powershell
-python test/test_analysis_runner.py
-python test/test_llm_agent.py
+python -m test.test_option_chain_cache
+python -m test.test_option_chain_tool_cache
+python -m test.test_graph_routing
+python -m test.test_natural_date_resolver
 ```
 
-Some checks use live browser automation and an external data source. Results can vary with market availability, upstream page changes, network conditions, and session state.
+The project also contains live/integration-oriented scripts under `test/`. Run those only when you intentionally want to use the configured external services.
 
-## Limitations and safety
+## Current Limitations
 
-- This repository is for educational and research purposes only. It is not investment advice.
-- Results depend on external option-chain data and should not be treated as complete, real-time, or error-free market information.
-- The LLM is limited to interpreting calculated results; it should not invent numerical values or market data.
-- V1 is synchronous, terminal-only, and handles one request per program run.
+- The CLI is a local, single-user interface.
+- Cache metadata such as exact fetch timestamp is not yet shown in final answers.
+- Relative-date support is intentionally limited to the expressions listed above.
+- Network failures and LLM timeouts do not yet have a retry policy.
+- Native LLM tool calling, MCP exposure, and a FastAPI/web interface are planned for V3.
 
-## Roadmap
+## V3 Direction
 
-- [ ] LangGraph State, Nodes, Edges, and Routing
-- [ ] Option-chain cache and request/result persistence
-- [ ] Error handling, retries, and regression tests
-- [ ] Native LLM tool calling
-- [ ] RAG-backed options strategy knowledge with citations
-- [ ] MCP server exposing typed analysis tools
-- [ ] FastAPI service, Docker, and deployment documentation
+- Native LLM Tool Calling
+- MCP server packaging for reusable analysis tools
+- FastAPI service and frontend integration
+- More robust retry, timeout, and observability behavior
+- Broader natural-language date resolution and explicit data freshness metadata
 
-## License
-
-No license has been selected yet. Do not assume permission to reuse this code until a license is added.

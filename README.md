@@ -163,6 +163,8 @@ The project also contains live/integration-oriented scripts under `test/`. Run t
 - Network failures and LLM timeouts do not yet have a retry policy.
 - Native LLM tool calling, MCP exposure, and a FastAPI/web interface are planned for V3.
 
+
+
 ## V3 Direction
 
 - Native LLM Tool Calling

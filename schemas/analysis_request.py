@@ -9,3 +9,7 @@ class AnalysisRequest:
     expiration: str
 
     analysis_types: list[str]
+
+    execution_mode: str = "run_analysis"
+
+    force_refresh: bool = False

@@ -5,6 +5,8 @@ from data.parser import OptionChainParser
 from tools.expiration_resolver import ExpirationResolver
 from tools.market_time_tool import MarketTimeTool
 
+from core.exceptions import ExpirationNotFoundError
+
 
 class OptionChainTool:
     """
@@ -27,6 +29,7 @@ class OptionChainTool:
         # 长生命周期资源
         self.client = runtime.client
 
+        self.cache = runtime.option_chain_cache
 
         # 无状态组件
         self.parser = OptionChainParser()
@@ -40,8 +43,39 @@ class OptionChainTool:
     def run(
         self,
         ticker: str,
-        expiration_date: str
+        expiration_date: str,
+        force_refresh: bool = False,
     ) -> OptionChainResult:
+
+        # ==========================
+        # 0.强制刷新或读取缓存
+        # ==========================
+        if force_refresh:
+            print(
+            "OptionChain cache bypass: force refresh",
+            ticker,
+            expiration_date,
+        )
+        else:
+            cached_result = self.cache.get(
+                ticker=ticker,
+                expiration=expiration_date,
+            )
+
+            if cached_result is not None:
+                print(
+                    "OptionChain cache hit:",
+                    ticker,
+                    expiration_date,
+                )
+
+                return cached_result
+
+            print(
+                "OptionChain cache miss:",
+                ticker,
+                expiration_date,
+            )
 
 
         # ==========================
@@ -88,8 +122,17 @@ class OptionChainTool:
 
         if target_expiration is None:
 
-            raise ValueError(
-                f"Expiration not found: {expiration_date}"
+            available_expirations = sorted(
+                info.expiration_date
+                for info in expiration_infos
+            )
+
+            raise ExpirationNotFoundError(
+                ticker=ticker,
+                requested_expiration=expiration_date,
+                available_expirations=(
+                    available_expirations
+                ),
             )
 
 
@@ -139,7 +182,7 @@ class OptionChainTool:
         # 6. 返回统一数据结构
         # ==========================
 
-        return OptionChainResult(
+        option_chain_result = OptionChainResult(
 
             ticker=ticker,
 
@@ -149,3 +192,11 @@ class OptionChainTool:
 
             contracts=contracts
         )
+
+        self.cache.set(
+            ticker=ticker,
+            expiration=expiration_date,
+            result=option_chain_result,
+        )
+
+        return option_chain_result

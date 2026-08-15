@@ -25,6 +25,10 @@ class RequestValidator:
         "maxpain"
     }
 
+    VALID_EXECUTION_MODES = {
+        "run_analysis",
+        "explain_existing",
+    }
 
 
     def validate(
@@ -100,5 +104,30 @@ class RequestValidator:
                     f"Unsupported analysis type: {analysis_type}"
                 )
 
+        if (
+            request.execution_mode
+            not in self.VALID_EXECUTION_MODES
+        ):
+            raise ValueError(
+                "Unsupported execution mode: "
+                f"{request.execution_mode}"
+            )
+
+        if not isinstance(
+            request.force_refresh,
+            bool
+        ):
+            raise ValueError(
+                "force_refresh must be a boolean"
+            )
+
+        if (
+            request.execution_mode
+            == "explain_existing"
+            and request.force_refresh
+        ):
+            raise ValueError(
+                "explain_existing cannot force refresh"
+            )
 
         return True

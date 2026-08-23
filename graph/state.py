@@ -9,8 +9,9 @@ class OptionAgentState(TypedDict, total=False):
     """
     Shared data for one option-analysis conversation.
     """
-
+    trace_id: str
     user_input: str
+    agent_decision: dict[str, str] | None
     request: AnalysisRequest
     validation_error: str | None
     analysis_result: AnalysisResult
@@ -29,3 +30,4 @@ class OptionAgentState(TypedDict, total=False):
     running_summary: str | None
 
     last_successful_request: dict[str, object] | None
+    last_successful_at: str | None

@@ -8,6 +8,11 @@ from graph.routing import (
     route_after_short_term_memory,
     route_after_analysis,
 )
+from graph.routing import (
+    route_after_agent_decision,
+    route_after_short_term_memory,
+    route_after_tool_execution,
+)
 
 
 def build_option_graph(
@@ -16,7 +21,7 @@ def build_option_graph(
 ):
 
     nodes = OptionGraphNodes(
-        agent
+    agent
     )
 
     builder = StateGraph(
@@ -24,13 +29,23 @@ def build_option_graph(
     )
 
     builder.add_node(
-        "parse_request",
-        nodes.parse_request_node
+        "agent_decide",
+        nodes.agent_decide_node
     )
 
     builder.add_node(
-        "validate_request",
-        nodes.validate_request_node
+        "execute_tool_call",
+        nodes.execute_tool_call_node
+    )
+
+    builder.add_node(
+        "direct_answer",
+        nodes.direct_answer_node
+    )
+
+    builder.add_node(
+        "generate_answer",
+        nodes.generate_answer_node
     )
 
     builder.add_node(
@@ -39,18 +54,8 @@ def build_option_graph(
     )
 
     builder.add_node(
-        "run_analysis",
-        nodes.run_analysis_node
-    )
-
-    builder.add_node(
-        "format_result",
-        nodes.format_result_node
-    )
-
-    builder.add_node(
-        "generate_answer",
-        nodes.generate_answer_node
+        "analysis_failed",
+        nodes.analysis_failed_node
     )
 
     builder.add_node(
@@ -63,58 +68,48 @@ def build_option_graph(
         nodes.summarize_conversation_node
     )
 
-    builder.add_node(
-        "analysis_failed",
-        nodes.analysis_failed_node
-    )
-
     builder.add_edge(
         START,
-        "parse_request"
-    )
-
-    builder.add_edge(
-        "parse_request",
-        "validate_request"
+        "agent_decide"
     )
 
     builder.add_conditional_edges(
-        "validate_request",
-        route_after_validation,
+        "agent_decide",
+        route_after_agent_decision,
         {
-            "run_analysis": "run_analysis",
-            "explain_existing": "generate_answer",
-            "invalid": "validation_failed",
+            "tool_call": "execute_tool_call",
+            "final_answer": "direct_answer",
         }
     )
 
-    builder.add_edge(
-        "validation_failed",
-        END
-    )
-
     builder.add_conditional_edges(
-        "run_analysis",
-        route_after_analysis,
+        "execute_tool_call",
+        route_after_tool_execution,
         {
-            "success": "format_result",
+            "success": "generate_answer",
+            "invalid": "validation_failed",
             "failed": "analysis_failed",
         }
     )
 
     builder.add_edge(
+        "generate_answer",
+        "update_short_term_memory"
+    )
+
+    builder.add_edge(
+        "direct_answer",
+        "update_short_term_memory"
+    )
+
+    builder.add_edge(
         "analysis_failed",
         "update_short_term_memory"
     )
 
     builder.add_edge(
-        "format_result",
-        "generate_answer"
-    )
-
-    builder.add_edge(
-        "generate_answer",
-        "update_short_term_memory"
+        "validation_failed",
+        END
     )
 
     builder.add_conditional_edges(
@@ -130,7 +125,6 @@ def build_option_graph(
         "summarize_conversation",
         END
     )
-
 
     return builder.compile(
         checkpointer=checkpointer,

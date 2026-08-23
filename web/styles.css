@@ -1,0 +1,262 @@
+:root {
+    color-scheme: dark;
+    font-family:
+        Inter, "Microsoft YaHei", "PingFang SC",
+        system-ui, sans-serif;
+    background: #101216;
+    color: #e9edf3;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    overflow: hidden;
+    background: #101216;
+}
+
+button,
+textarea {
+    font: inherit;
+}
+
+.app-layout {
+    height: 100vh;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+}
+
+.sidebar {
+    width: 260px;
+    min-height: 0;
+    flex: 0 0 260px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    overflow: hidden;
+    border-right: 1px solid #2a3039;
+    background: #15191f;
+}
+
+.new-chat-button,
+.send-button,
+.secondary-button {
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+}
+
+.new-chat-button,
+.send-button {
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.secondary-button {
+    background: #242b35;
+    color: #dbe5f2;
+}
+
+button:hover {
+    filter: brightness(1.12);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.sidebar-heading {
+    color: #98a4b5;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.conversation-list {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.conversation-item {
+    width: 100%;
+    overflow: hidden;
+    padding: 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #dce5f0;
+    text-align: left;
+}
+
+.conversation-item:hover {
+    background: #222a35;
+}
+
+.conversation-item.active {
+    border-color: #426aaf;
+    background: #223756;
+}
+
+.conversation-item-title {
+    overflow: hidden;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conversation-item-time {
+    margin-top: 4px;
+    color: #94a3b8;
+    font-size: 0.74rem;
+}
+
+.empty-conversations {
+    color: #94a3b8;
+    font-size: 0.85rem;
+}
+
+.chat-panel {
+    min-width: 0;
+    min-height: 0;
+    height: 100vh;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 24px 18px;
+    overflow: hidden;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: min(920px, 100%);
+    margin: 0 auto;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #2a3039;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.topbar p {
+    margin: 6px 0 0;
+    color: #9da8b8;
+    font-size: 0.9rem;
+}
+
+.chat-messages {
+    width: min(920px, 100%);
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 0 auto;
+    padding: 24px 0;
+    overflow-y: auto;
+}
+
+.message {
+    max-width: min(82%, 720px);
+    padding: 13px 15px;
+    border-radius: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.message-role {
+    margin-bottom: 6px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    opacity: 0.72;
+}
+
+.assistant-message {
+    align-self: flex-start;
+    background: #1d2633;
+    border: 1px solid #2f3d50;
+}
+
+.user-message {
+    align-self: flex-end;
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.error-message {
+    align-self: flex-start;
+    background: #412027;
+    border: 1px solid #7f303f;
+}
+
+.chat-form {
+    width: min(920px, 100%);
+    margin: 0 auto;
+    padding-top: 16px;
+    border-top: 1px solid #2a3039;
+}
+
+textarea {
+    width: 100%;
+    min-height: 72px;
+    resize: vertical;
+    padding: 12px;
+    border: 1px solid #3b4553;
+    border-radius: 10px;
+    outline: none;
+    background: #171b21;
+    color: #e9edf3;
+}
+
+textarea:focus {
+    border-color: #4d8dff;
+}
+
+.chat-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.status-text {
+    color: #9da8b8;
+    font-size: 0.86rem;
+}
+
+@media (max-width: 700px) {
+    .sidebar {
+        width: 190px;
+        flex-basis: 190px;
+        padding: 10px;
+    }
+
+    .chat-panel {
+        padding: 16px 12px;
+    }
+
+    .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .message {
+        max-width: 92%;
+    }
+}

@@ -12,6 +12,14 @@ from core.request_validator import RequestValidator
 
 from agent.result_formatter import ResultFormatter
 
+from agent.tool_calling.tool_executor import (
+    OptionToolExecutor,
+)
+
+from agent.tool_calling.tool_schemas import (
+    OPTION_ANALYSIS_TOOLS,
+)
+
 
 
 class LLMAgent:
@@ -41,6 +49,234 @@ class LLMAgent:
 
         self.formatter = ResultFormatter()
 
+        self.tool_schemas = OPTION_ANALYSIS_TOOLS
+
+        self.tool_executor = OptionToolExecutor(
+        runner=self.runner,
+        validator=self.validator,
+        formatter=self.formatter,
+        )
+
+
+    def execute_tool_call(
+        self,
+        tool_name: str,
+        arguments_json: str,
+        trace_id: str | None = None,
+    ) -> dict:
+
+        return self.tool_executor.execute(
+            tool_name=tool_name,
+            arguments_json=arguments_json,
+            trace_id=trace_id,
+        )
+
+    def generate_answer_after_tool_call(
+        self,
+        user_input: str,
+        decision: dict[str, str],
+        analysis_context: str,
+    ) -> str:
+
+        system_prompt = """
+    You are an options analysis assistant.
+
+    The application has already retrieved and analyzed the requested
+    option-chain data through a tool.
+
+    Use only the tool result below to answer the user.
+    Do not invent market data, prices, dates, indicators, or conclusions
+    that are absent from the tool result.
+
+    Clearly state that the analysis is based on data retrieved by this agent.
+    Answer in the user's language.
+    Do not provide financial advice.
+    """
+
+        assistant_tool_message = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": decision["tool_call_id"],
+                    "type": "function",
+                    "function": {
+                        "name": decision["tool_name"],
+                        "arguments": decision["arguments_json"],
+                    },
+                }
+            ],
+        }
+
+        tool_result_message = {
+            "role": "tool",
+            "tool_call_id": decision["tool_call_id"],
+            "content": analysis_context,
+        }
+
+        response = self.client.chat.completions.create(
+            model="deepseek-v4-flash",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_input,
+                },
+                assistant_tool_message,
+                tool_result_message,
+            ],
+        )
+
+        return response.choices[0].message.content or ""
+
+
+    def decide_next_action(
+        self,
+        user_input: str,
+        conversation_history: list[dict[str, str]] | None = None,
+        last_successful_request: dict[str, object] | None = None,
+        running_summary: str | None = None,
+        market_date: str | None = None,
+        resolved_expiration: str | None = None,
+        analysis_context: str | None = None,
+        has_fresh_analysis: bool = False,
+    ) -> dict:
+
+        system_prompt = """
+
+You are an options analysis assistant.
+
+Decide whether to call the available tool.
+
+Call run_option_analysis exactly once when the user:
+- requests new option-chain analysis
+- requests a new indicator
+- changes ticker or expiration
+- asks to refresh, update, or re-fetch data
+- asks an ambiguous question that requires new option data
+
+Decision priority:
+1. Call run_option_analysis when the user explicitly requests
+   analysis, an option indicator, option-chain data, a ticker,
+   an expiration date, a refresh, or an update.
+2. A direct answer based on previous market analysis is allowed
+   only when Fresh analysis context is true.
+3. When Fresh analysis context is false:
+   - never answer using old option-market data
+   - never summarize or explain old market-analysis conclusions
+   - call the tool whenever the user needs option analysis
+4. When Fresh analysis context is true:
+   - use direct_answer only for a clear follow-up such as
+     "explain further", "summarize that", or
+     "why does that matter"
+   - do not call the tool again for a pure explanation request
+   - do not use direct_answer for a new ticker, a new expiration,
+     a new indicator, an analysis request, or a refresh request
+5. If uncertain whether the user requests new analysis or merely
+   asks for explanation, call the tool.
+
+Rules:
+
+1. Never invent option-market data.
+2. When new data is required, call the tool instead of giving
+   a normal text answer.
+3. Tool expiration must be YYYY-MM-DD.
+4. If a resolved expiration is provided, use it exactly.
+5. force_refresh is true only when the user explicitly asks
+   to refresh, update, fetch latest data, or ignore cache.
+6. For a normal request, omit force_refresh or use false.
+7. If no tool call is needed, provide a direct helpful answer
+   based only on the existing analysis context.
+
+"""
+
+        history = conversation_history or []
+
+        previous_request = (
+            json.dumps(
+                last_successful_request,
+                ensure_ascii=False,
+            )
+            if last_successful_request
+            else "None"
+        )
+
+        response = self.client.chat.completions.create(
+            model="deepseek-v4-flash",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                *history,
+                {
+                    "role": "user",
+                    "content": f"""
+Current user request:
+
+{user_input}
+
+Current US market date in New York:
+
+{market_date or "Not provided"}
+
+Resolved expiration from deterministic date handling:
+
+{resolved_expiration or "None"}
+
+Previous successful structured request:
+
+{previous_request}
+
+Conversation summary:
+
+{running_summary or "None"}
+
+Fresh analysis context:
+
+{has_fresh_analysis}
+
+Existing analysis context:
+
+{analysis_context or "None"}
+
+Use previous context only to resolve references such as
+"same ticker", "same date", or "explain further".
+""",
+                },
+            ],
+            tools=self.tool_schemas,
+        )
+
+        message = response.choices[0].message
+
+        if message.tool_calls:
+
+            if len(message.tool_calls) != 1:
+
+                raise ValueError(
+                    "Only one tool call is allowed "
+                    "per user turn."
+                )
+
+            tool_call = message.tool_calls[0]
+
+            return {
+                "decision_type": "tool_call",
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_call.function.name,
+                "arguments_json": (
+                    tool_call.function.arguments
+                ),
+            }
+
+        return {
+            "decision_type": "final_answer",
+            "content": message.content or "",
+        }
 
 
     def create_request(

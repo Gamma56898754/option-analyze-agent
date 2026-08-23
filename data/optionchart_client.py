@@ -17,7 +17,9 @@ This file DOES NOT:
 
 """
 
-
+from core.exceptions import (
+    MarketDataUnavailableError,
+)
 import requests
 
 
@@ -177,18 +179,21 @@ class OptionChartClient:
 
 
 
-        response = self.session.get(
+        try:
 
-            url,
+            response = self.session.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=10,
+            )
 
-            params=params,
+        except requests.RequestException as exc:
 
-            headers=headers,
-
-            timeout=10
-
-        )
-
+            raise MarketDataUnavailableError(
+                source="OptionCharts",
+                operation="option_chain",
+            ) from exc
 
 
         print(
@@ -212,8 +217,13 @@ class OptionChartClient:
             len(response.text)
         )
 
+        if response.status_code != 200:
 
-        response.raise_for_status()
+            raise MarketDataUnavailableError(
+                source="OptionCharts",
+                operation="option_chain",
+                status_code=response.status_code,
+            )
 
 
         return response.text
@@ -260,15 +270,20 @@ class OptionChartClient:
         )
 
 
-        response = self.session.get(
+        try:
 
-            url,
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=10,
+            )
 
-            params=params,
+        except requests.RequestException as exc:
 
-            timeout=10
-
-        )
+            raise MarketDataUnavailableError(
+                source="OptionCharts",
+                operation="expiration_overview",
+            ) from exc
 
 
         print(
@@ -279,8 +294,10 @@ class OptionChartClient:
 
         if response.status_code != 200:
 
-            raise Exception(
-                f"Expiration overview failed: {response.status_code}"
+            raise MarketDataUnavailableError(
+                source="OptionCharts",
+                operation="expiration_overview",
+                status_code=response.status_code,
             )
 
 

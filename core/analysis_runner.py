@@ -1,6 +1,7 @@
 from schemas.analysis_request import AnalysisRequest
 from schemas.analysis_result import AnalysisResult
-
+import time
+from core.trace import log_trace_event
 
 from tools.option_chain_tool import OptionChainTool
 from tools.gex_tool import GEXTool
@@ -44,11 +45,26 @@ class AnalysisRunner:
 
         }
 
+    @staticmethod
+    def _trace(
+        trace_id: str | None,
+        event: str,
+        **fields,
+    ) -> None:
 
+        if trace_id is None:
+            return
+
+        log_trace_event(
+            trace_id=trace_id,
+            event=event,
+            **fields,
+        )
 
     def run(
         self,
-        request: AnalysisRequest
+        request: AnalysisRequest,
+        trace_id: str | None = None,
     ) -> AnalysisResult:
 
 
@@ -62,6 +78,7 @@ class AnalysisRunner:
                 ticker=request.ticker,
                 expiration_date=request.expiration,
                 force_refresh=request.force_refresh,
+                trace_id=trace_id,
             )
         )
 
@@ -100,8 +117,47 @@ class AnalysisRunner:
                 )
 
 
-            result = tool.run(
-                option_chain_result
+            calculation_started_at = time.perf_counter()
+
+            self._trace(
+                trace_id,
+                "analysis_calculation_started",
+                analysis_type=analysis_type,
+            )
+
+            try:
+                result = tool.run(
+                    option_chain_result
+                )
+
+            except Exception as exc:
+
+                self._trace(
+                    trace_id,
+                    "analysis_calculation_failed",
+                    analysis_type=analysis_type,
+                    error_type=type(exc).__name__,
+                    duration_ms=round(
+                        (
+                            time.perf_counter()
+                            - calculation_started_at
+                        ) * 1000,
+                        2,
+                    ),
+                )
+                raise
+
+            self._trace(
+                trace_id,
+                "analysis_calculation_completed",
+                analysis_type=analysis_type,
+                duration_ms=round(
+                    (
+                        time.perf_counter()
+                        - calculation_started_at
+                    ) * 1000,
+                    2,
+                ),
             )
 
 

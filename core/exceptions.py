@@ -22,3 +22,28 @@ class ExpirationNotFoundError(ValueError):
             f"Expiration not found: "
             f"{requested_expiration}"
         )
+
+class MarketDataUnavailableError(RuntimeError):
+    """
+    The external market-data source could not
+    complete a request for this user turn.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        operation: str,
+        status_code: int | None = None,
+    ):
+        self.source = source
+        self.operation = operation
+        self.status_code = status_code
+
+        detail = (
+            f"{source} unavailable during {operation}"
+        )
+
+        if status_code is not None:
+            detail += f" (HTTP {status_code})"
+
+        super().__init__(detail)

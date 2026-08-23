@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Option Analyze Agent</title>
+    <link
+        rel="stylesheet"
+        href="/static/styles.css"
+    >
+</head>
+<body>
+    <main class="app-layout">
+        <aside class="sidebar">
+            <button
+                id="new-chat-button"
+                class="new-chat-button"
+                type="button"
+            >
+                + 新建会话
+            </button>
+
+            <div class="sidebar-heading">
+                最近对话
+            </div>
+
+            <nav
+                id="conversation-list"
+                class="conversation-list"
+            ></nav>
+        </aside>
+
+        <section class="chat-panel">
+            <header class="topbar">
+                <div>
+                    <h1 id="conversation-title">
+                        Option Analyze Agent
+                    </h1>
+                    <p>
+                        基于期权链数据的
+                        GEX / DEX / OI / Max Pain 分析
+                    </p>
+                </div>
+
+                <button
+                    id="rename-title-button"
+                    class="secondary-button"
+                    type="button"
+                >
+                    修改标题
+                </button>
+            </header>
+
+            <section
+                id="chat-messages"
+                class="chat-messages"
+                aria-live="polite"
+            ></section>
+
+            <form
+                id="chat-form"
+                class="chat-form"
+            >
+                <textarea
+                    id="message-input"
+                    rows="3"
+                    maxlength="4000"
+                    placeholder="输入你的期权分析需求…"
+                    required
+                ></textarea>
+
+                <div class="chat-actions">
+                    <span
+                        id="status-text"
+                        class="status-text"
+                    ></span>
+
+                    <button
+                        id="send-button"
+                        class="send-button"
+                        type="submit"
+                    >
+                        发送
+                    </button>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -54,3 +54,57 @@ def route_after_analysis(
         return "failed"
 
     return "success"
+
+def route_after_agent_decision(
+    state: OptionAgentState,
+) -> str:
+
+    decision = state.get(
+        "agent_decision"
+    )
+
+    if decision is None:
+
+        raise ValueError(
+            "Missing agent decision"
+        )
+
+    decision_type = decision.get(
+        "decision_type"
+    )
+
+    if decision_type == "tool_call":
+
+        print(
+            "Route: execute tool call"
+        )
+
+        return "tool_call"
+
+    if decision_type == "final_answer":
+
+        print(
+            "Route: direct answer"
+        )
+
+        return "final_answer"
+
+    raise ValueError(
+        "Unsupported agent decision type: "
+        f"{decision_type}"
+    )
+
+
+def route_after_tool_execution(
+    state: OptionAgentState,
+) -> str:
+
+    if state.get("validation_error"):
+
+        return "invalid"
+
+    if state.get("analysis_error"):
+
+        return "failed"
+
+    return "success"

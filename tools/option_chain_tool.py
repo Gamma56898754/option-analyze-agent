@@ -6,6 +6,9 @@ from tools.expiration_resolver import ExpirationResolver
 from tools.market_time_tool import MarketTimeTool
 
 from core.exceptions import ExpirationNotFoundError
+import time
+
+from core.trace import log_trace_event
 
 
 class OptionChainTool:
@@ -38,14 +41,31 @@ class OptionChainTool:
 
         self.market_time_tool = MarketTimeTool()
 
+    @staticmethod
+    def _trace(
+        trace_id: str | None,
+        event: str,
+        **fields,
+    ) -> None:
 
+        if trace_id is None:
+            return
+
+        log_trace_event(
+            trace_id=trace_id,
+            event=event,
+            **fields,
+        )
 
     def run(
         self,
         ticker: str,
         expiration_date: str,
         force_refresh: bool = False,
+        trace_id: str | None = None,
     ) -> OptionChainResult:
+
+        started_at = time.perf_counter()
 
         # ==========================
         # 0.强制刷新或读取缓存
@@ -56,6 +76,12 @@ class OptionChainTool:
             ticker,
             expiration_date,
         )
+            self._trace(
+                trace_id,
+                "option_chain_cache_bypassed",
+                ticker=ticker,
+                expiration=expiration_date,
+            )
         else:
             cached_result = self.cache.get(
                 ticker=ticker,
@@ -69,6 +95,17 @@ class OptionChainTool:
                     expiration_date,
                 )
 
+                self._trace(
+                    trace_id,
+                    "option_chain_cache_hit",
+                    ticker=ticker,
+                    expiration=expiration_date,
+                    duration_ms=round(
+                        (time.perf_counter() - started_at) * 1000,
+                        2,
+                    ),
+                )
+
                 return cached_result
 
             print(
@@ -77,6 +114,19 @@ class OptionChainTool:
                 expiration_date,
             )
 
+            self._trace(
+                trace_id,
+                "option_chain_cache_miss",
+                ticker=ticker,
+                expiration=expiration_date,
+            )
+
+        self._trace(
+            trace_id,
+            "option_chain_fetch_started",
+            ticker=ticker,
+            expiration=expiration_date,
+        )
 
         # ==========================
         # 1. 获取当前市场时间
@@ -197,6 +247,18 @@ class OptionChainTool:
             ticker=ticker,
             expiration=expiration_date,
             result=option_chain_result,
+        )
+
+        self._trace(
+            trace_id,
+            "option_chain_fetch_completed",
+            ticker=ticker,
+            expiration=expiration_date,
+            contract_count=len(contracts),
+            duration_ms=round(
+                (time.perf_counter() - started_at) * 1000,
+                2,
+            ),
         )
 
         return option_chain_result

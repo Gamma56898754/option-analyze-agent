@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from schemas.option_chain_result import OptionChainResult
 
 
+CACHE_TTL_SECONDS = 300
+
 @dataclass
 class OptionChainCacheEntry:
     result: OptionChainResult
@@ -23,9 +25,15 @@ class OptionChainCache:
 
     def __init__(
         self,
-        ttl: timedelta = timedelta(minutes=5),
+        ttl: timedelta | None = None,
     ):
-        self.ttl = ttl
+        self.ttl = (
+            ttl
+            if ttl is not None
+            else timedelta(
+                seconds=CACHE_TTL_SECONDS
+            )
+        )
 
         self._entries: dict[
             tuple[str, str],

@@ -6,9 +6,11 @@ from agent.llm_agent import LLMAgent
 from core.runtime import Runtime
 from graph.option_graph import build_option_graph
 
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-import sqlite3
-from langgraph.checkpoint.sqlite import SqliteSaver
+from pathlib import Path
+
+from core.checkpoint_factory import (
+    create_sqlite_checkpointer,
+)
 
 
 def main():
@@ -32,30 +34,12 @@ def main():
         api_key=api_key
     )
 
-    allowed_msgpack_modules = [
-        ("schemas.analysis_request", "AnalysisRequest"),
-        ("analysis.gex_calculation", "ContractGEX"),
-        ("schemas.gex_result", "GEXAnalysisResult"),
-        ("schemas.dex_result", "DEXResult"),
-        ("schemas.option_contract", "OptionContract"),
-        ("schemas.oi_result", "OIAnalysisResult"),
-        ("schemas.max_pain_result", "MaxPainResult"),
-        ("schemas.analysis_result", "AnalysisResult"),
-    ]
-
-    serializer = JsonPlusSerializer(
-    allowed_msgpack_modules=allowed_msgpack_modules
+    checkpointer, db_connection = (
+        create_sqlite_checkpointer(
+            Path("memory")
+            / "option_agent_checkpoints.db"
         )
-
-    db_connection = sqlite3.connect(
-    "memory/option_agent_checkpoints.db",
-    check_same_thread=False,
-        )
-
-    checkpointer = SqliteSaver(
-    db_connection,
-    serde=serializer,
-        )
+    )
 
     graph = build_option_graph(
         agent,

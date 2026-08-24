@@ -99,6 +99,10 @@ def route_after_tool_execution(
     state: OptionAgentState,
 ) -> str:
 
+    if state.get("loop_termination_reason"):
+
+        return "loop_terminated"
+
     if state.get("validation_error"):
 
         return "invalid"
@@ -107,4 +111,4 @@ def route_after_tool_execution(
 
         return "failed"
 
-    return "success"
+    return "continue"

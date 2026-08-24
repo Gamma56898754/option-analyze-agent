@@ -91,10 +91,16 @@ def main():
     tool.resolver = FakeExpirationResolver()
     tool.parser = FakeParser()
 
-    first_result = tool.run(
+    first_result, first_quality_report = (
+        tool.run_with_data_quality(
         ticker="TSLA",
         expiration_date="2026-08-17",
+        )
     )
+
+    assert first_quality_report.cache_state == "miss"
+    assert first_quality_report.contract_count == 0
+    assert first_quality_report.warnings
 
     assert (
         runtime.client.expiration_overview_calls
@@ -106,12 +112,18 @@ def main():
         == 1
     )
 
-    second_result = tool.run(
+    second_result, second_quality_report = (
+        tool.run_with_data_quality(
         ticker="TSLA",
         expiration_date="2026-08-17",
+        )
     )
 
     assert second_result is first_result
+    assert second_quality_report.cache_state == "hit"
+    assert second_quality_report.fetched_at == (
+        first_quality_report.fetched_at
+    )
 
     assert (
         runtime.client.expiration_overview_calls
@@ -123,13 +135,16 @@ def main():
         == 1
     )
 
-    refreshed_result = tool.run(
+    refreshed_result, refreshed_quality_report = (
+        tool.run_with_data_quality(
         ticker="TSLA",
         expiration_date="2026-08-17",
         force_refresh=True,
+        )
     )
 
     assert refreshed_result is not first_result
+    assert refreshed_quality_report.cache_state == "bypass"
 
     assert (
         runtime.client.expiration_overview_calls
@@ -141,12 +156,18 @@ def main():
         == 2
     )
 
-    cached_after_refresh = tool.run(
+    cached_after_refresh, cached_quality_report = (
+        tool.run_with_data_quality(
         ticker="TSLA",
         expiration_date="2026-08-17",
+        )
     )
 
     assert cached_after_refresh is refreshed_result
+    assert cached_quality_report.cache_state == "hit"
+    assert cached_quality_report.fetched_at == (
+        refreshed_quality_report.fetched_at
+    )
 
     assert (
         runtime.client.expiration_overview_calls

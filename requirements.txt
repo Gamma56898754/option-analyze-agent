@@ -34,6 +34,7 @@ langgraph-sdk==0.4.2
 langsmith==0.10.10
 lxml==6.1.1
 markdown-it-py==4.2.0
+mcp[cli]>=2.0,<3.0
 mdurl==0.1.2
 multitasking==0.0.13
 numpy==2.5.1

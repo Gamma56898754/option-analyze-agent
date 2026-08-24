@@ -45,7 +45,17 @@ def test_route_after_tool_execution():
         )
     )
 
-    assert success_route == "success"
+    assert success_route == "continue"
+
+    loop_terminated_route = (
+        route_after_tool_execution(
+            {
+                "loop_termination_reason": "max_tool_steps",
+            }
+        )
+    )
+
+    assert loop_terminated_route == "loop_terminated"
 
     invalid_route = (
         route_after_tool_execution(

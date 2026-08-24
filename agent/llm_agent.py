@@ -1,7 +1,7 @@
 from openai import OpenAI
 import json 
 import os
-
+from skills.skill_loader import SkillLoader
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,6 +50,11 @@ class LLMAgent:
         self.formatter = ResultFormatter()
 
         self.tool_schemas = OPTION_ANALYSIS_TOOLS
+        self.skill_loader = SkillLoader()
+
+        self.option_skill = self.skill_loader.load(
+            "option-analysis"
+        )
 
         self.tool_executor = OptionToolExecutor(
         runner=self.runner,
@@ -89,6 +94,8 @@ class LLMAgent:
     that are absent from the tool result.
 
     Clearly state that the analysis is based on data retrieved by this agent.
+    If the tool result includes a DATA QUALITY WARNING, state that warning
+    clearly and do not downplay it.
     Answer in the user's language.
     Do not provide financial advice.
     """
@@ -143,55 +150,40 @@ class LLMAgent:
         resolved_expiration: str | None = None,
         analysis_context: str | None = None,
         has_fresh_analysis: bool = False,
+        tool_observations: list[dict[str, object]] | None = None,
     ) -> dict:
 
-        system_prompt = """
+        system_prompt = f"""
 
-You are an options analysis assistant.
+        You are a tool-using AI assistant.
 
-Decide whether to call the available tool.
+        Follow the active skill instructions below.
 
-Call run_option_analysis exactly once when the user:
-- requests new option-chain analysis
-- requests a new indicator
-- changes ticker or expiration
-- asks to refresh, update, or re-fetch data
-- asks an ambiguous question that requires new option data
+        --- Active Skill: option-analysis ---
 
-Decision priority:
-1. Call run_option_analysis when the user explicitly requests
-   analysis, an option indicator, option-chain data, a ticker,
-   an expiration date, a refresh, or an update.
-2. A direct answer based on previous market analysis is allowed
-   only when Fresh analysis context is true.
-3. When Fresh analysis context is false:
-   - never answer using old option-market data
-   - never summarize or explain old market-analysis conclusions
-   - call the tool whenever the user needs option analysis
-4. When Fresh analysis context is true:
-   - use direct_answer only for a clear follow-up such as
-     "explain further", "summarize that", or
-     "why does that matter"
-   - do not call the tool again for a pure explanation request
-   - do not use direct_answer for a new ticker, a new expiration,
-     a new indicator, an analysis request, or a refresh request
-5. If uncertain whether the user requests new analysis or merely
-   asks for explanation, call the tool.
+        {getattr(self, "option_skill", "")}
 
-Rules:
+        --- Global Agent Rules ---
 
-1. Never invent option-market data.
-2. When new data is required, call the tool instead of giving
-   a normal text answer.
-3. Tool expiration must be YYYY-MM-DD.
-4. If a resolved expiration is provided, use it exactly.
-5. force_refresh is true only when the user explicitly asks
-   to refresh, update, fetch latest data, or ignore cache.
-6. For a normal request, omit force_refresh or use false.
-7. If no tool call is needed, provide a direct helpful answer
-   based only on the existing analysis context.
+        1. Use a tool when the active skill requires
+        current or newly retrieved data.
+        2. If a tool is not needed, answer only within the
+        active skill's allowed boundaries.
+        3. Never invent tool results, market data, dates,
+        prices, indicators, or analysis conclusions.
+        4. Make at most one tool call in a single model response.
+        5. Tool results from this user turn are authoritative. After receiving
+           a successful result, answer the user unless another distinct tool
+           call is necessary.
+        6. Never repeat a tool call with the same arguments after a successful
+           result or a duplicate-call warning.
+        7. When uncertain whether a request needs new data,
+        prefer the tool call.
+        8. If a tool result reports temporary data-source unavailability,
+           do not retry it indefinitely. Reconsider the request and answer
+           when no useful distinct tool call remains.
 
-"""
+        """
 
         history = conversation_history or []
 
@@ -203,6 +195,31 @@ Rules:
             if last_successful_request
             else "None"
         )
+
+        observation_messages = []
+
+        for observation in tool_observations or []:
+            observation_messages.extend([
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": observation["tool_call_id"],
+                            "type": "function",
+                            "function": {
+                                "name": observation["tool_name"],
+                                "arguments": observation["arguments_json"],
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": observation["tool_call_id"],
+                    "content": observation["content"],
+                },
+            ])
 
         response = self.client.chat.completions.create(
             model="deepseek-v4-flash",
@@ -247,6 +264,7 @@ Use previous context only to resolve references such as
 "same ticker", "same date", or "explain further".
 """,
                 },
+                *observation_messages,
             ],
             tools=self.tool_schemas,
         )
@@ -596,6 +614,8 @@ Older conversation messages to summarize:
         analysis's option-chain data snapshot retrieved by the agent.
         - Do not describe the data as real-time or latest unless the
         provided analysis data explicitly includes a retrieval timestamp.
+        - If the analysis data includes a DATA QUALITY WARNING, state it
+        clearly in the answer.
 
 
         Answer in a professional but understandable way.

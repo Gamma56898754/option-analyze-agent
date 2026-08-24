@@ -18,6 +18,7 @@ class FakeSuccessAgent:
         self,
         tool_name,
         arguments_json,
+        trace_id=None,
     ):
 
         self.tool_name = tool_name
@@ -47,6 +48,7 @@ class FakeExpirationErrorAgent:
         self,
         tool_name,
         arguments_json,
+        trace_id=None,
     ):
 
         raise ExpirationNotFoundError(

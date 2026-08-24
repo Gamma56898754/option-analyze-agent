@@ -32,6 +32,40 @@ class ResultFormatter:
             f"Expiration: {result.expiration}"
         )
 
+        data_quality_report = result.data_quality_report
+
+        if data_quality_report is not None:
+
+            output.append(
+                "\n=== DATA QUALITY ==="
+            )
+
+            output.append(
+                f"Source: {data_quality_report.source}"
+            )
+
+            output.append(
+                "Fetched At: "
+                f"{data_quality_report.fetched_at.isoformat()}"
+            )
+
+            output.append(
+                "Cache State: "
+                f"{data_quality_report.cache_state}"
+            )
+
+            output.append(
+                "Contract Count: "
+                f"{data_quality_report.contract_count}"
+            )
+
+            for warning in data_quality_report.warnings:
+
+                output.append(
+                    "DATA QUALITY WARNING: "
+                    f"{warning}"
+                )
+
 
         # ==========================
         # GEX

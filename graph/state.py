@@ -12,6 +12,20 @@ class OptionAgentState(TypedDict, total=False):
     trace_id: str
     user_input: str
     agent_decision: dict[str, str] | None
+    tool_observations: Annotated[
+        list[dict[str, object]],
+        add
+    ]
+    tool_call_signatures: Annotated[
+        list[str],
+        add
+    ]
+    tool_step_count: int
+    max_tool_steps: int
+    consecutive_tool_failure_count: int
+    last_failed_tool_name: str | None
+    max_consecutive_tool_failures: int
+    loop_termination_reason: str | None
     request: AnalysisRequest
     validation_error: str | None
     analysis_result: AnalysisResult

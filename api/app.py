@@ -17,6 +17,7 @@ from core.trace import log_trace_event
 from core.exceptions import (
     MarketDataUnavailableError,
 )
+from langgraph.errors import GraphRecursionError
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -41,6 +42,8 @@ logger = logging.getLogger(
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+GRAPH_RECURSION_LIMIT = 15
 
 WEB_DIR = PROJECT_ROOT / "web"
 
@@ -166,6 +169,7 @@ def chat(
         message_length=len(user_input),
     )
     config = {
+        "recursion_limit": GRAPH_RECURSION_LIMIT,
         "configurable": {
             "thread_id": thread_id,
         }
@@ -182,6 +186,47 @@ def chat(
                 },
                 config=config,
             )
+
+    except GraphRecursionError:
+
+        logger.warning(
+            "Agent graph recursion limit reached. "
+            "thread_id=%s limit=%s",
+            thread_id,
+            GRAPH_RECURSION_LIMIT,
+        )
+
+        log_trace_event(
+            trace_id=trace_id,
+            event="chat_graph_recursion_limit_reached",
+            thread_id=thread_id,
+            recursion_limit=GRAPH_RECURSION_LIMIT,
+            duration_ms=round(
+                (
+                    time.perf_counter()
+                    - started_at
+                ) * 1000,
+                2,
+            ),
+        )
+
+        answer = (
+            "本轮分析的内部步骤已达到安全上限，"
+            "未继续执行更多工具调用。请简化问题后重试。"
+        )
+
+        request.app.state.conversation_store.save_turn(
+            thread_id=thread_id,
+            user_message=user_input,
+            assistant_message=answer,
+        )
+
+        return ChatResponse(
+            thread_id=thread_id,
+            answer=answer,
+            decision_type="final_answer",
+            trace_id=trace_id,
+        )
 
     except MarketDataUnavailableError as exc:
 

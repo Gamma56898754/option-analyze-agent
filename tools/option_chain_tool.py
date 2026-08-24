@@ -6,7 +6,9 @@ from tools.expiration_resolver import ExpirationResolver
 from tools.market_time_tool import MarketTimeTool
 
 from core.exceptions import ExpirationNotFoundError
+from schemas.data_quality_report import DataQualityReport
 import time
+from datetime import datetime, timezone
 
 from core.trace import log_trace_event
 
@@ -26,6 +28,8 @@ class OptionChainTool:
         runtime提供client
 
     """
+
+    DATA_SOURCE = "OptionCharts"
 
     def __init__(self, runtime):
 
@@ -65,6 +69,24 @@ class OptionChainTool:
         trace_id: str | None = None,
     ) -> OptionChainResult:
 
+        result, _ = self.run_with_data_quality(
+            ticker=ticker,
+            expiration_date=expiration_date,
+            force_refresh=force_refresh,
+            trace_id=trace_id,
+        )
+
+        return result
+
+    def run_with_data_quality(
+        self,
+        ticker: str,
+        expiration_date: str,
+        force_refresh: bool = False,
+        trace_id: str | None = None,
+    ) -> tuple[OptionChainResult, DataQualityReport]:
+        """Return the chain and per-request provenance without mutating cache."""
+
         started_at = time.perf_counter()
 
         # ==========================
@@ -83,12 +105,12 @@ class OptionChainTool:
                 expiration=expiration_date,
             )
         else:
-            cached_result = self.cache.get(
+            cached_entry = self.cache.get_entry(
                 ticker=ticker,
                 expiration=expiration_date,
             )
 
-            if cached_result is not None:
+            if cached_entry is not None:
                 print(
                     "OptionChain cache hit:",
                     ticker,
@@ -106,7 +128,19 @@ class OptionChainTool:
                     ),
                 )
 
-                return cached_result
+                return (
+                    cached_entry.result,
+                    self._build_data_quality_report(
+                        fetched_at=cached_entry.cached_at,
+                        cache_state="hit",
+                        contract_count=len(
+                            cached_entry.result.contracts
+                        ),
+                        underlying_price=(
+                            cached_entry.result.underlying_price
+                        ),
+                    ),
+                )
 
             print(
                 "OptionChain cache miss:",
@@ -243,10 +277,13 @@ class OptionChainTool:
             contracts=contracts
         )
 
+        fetched_at = datetime.now(timezone.utc)
+
         self.cache.set(
             ticker=ticker,
             expiration=expiration_date,
             result=option_chain_result,
+            now=fetched_at,
         )
 
         self._trace(
@@ -261,4 +298,47 @@ class OptionChainTool:
             ),
         )
 
-        return option_chain_result
+        cache_state = (
+            "bypass"
+            if force_refresh
+            else "miss"
+        )
+
+        return (
+            option_chain_result,
+            self._build_data_quality_report(
+                fetched_at=fetched_at,
+                cache_state=cache_state,
+                contract_count=len(contracts),
+                underlying_price=underlying_price,
+            ),
+        )
+
+    def _build_data_quality_report(
+        self,
+        fetched_at: datetime,
+        cache_state: str,
+        contract_count: int,
+        underlying_price: float,
+    ) -> DataQualityReport:
+        """Report only quality signals observable from the retrieved chain."""
+
+        warnings = []
+
+        if contract_count == 0:
+            warnings.append(
+                "The retrieved option chain contains no contracts."
+            )
+
+        if underlying_price <= 0:
+            warnings.append(
+                "The retrieved option chain has no valid underlying price."
+            )
+
+        return DataQualityReport(
+            source=self.DATA_SOURCE,
+            fetched_at=fetched_at,
+            cache_state=cache_state,
+            contract_count=contract_count,
+            warnings=warnings,
+        )

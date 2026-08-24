@@ -3,6 +3,7 @@ from schemas.gex_result import GEXAnalysisResult
 from schemas.dex_result import DEXResult
 from schemas.oi_result import OIAnalysisResult
 from schemas.max_pain_result import MaxPainResult    
+from schemas.data_quality_report import DataQualityReport
 
 @dataclass
 class AnalysisResult:
@@ -18,3 +19,5 @@ class AnalysisResult:
     oi_result: OIAnalysisResult | None = None
 
     maxpain_result: MaxPainResult | None = None
+
+    data_quality_report: DataQualityReport | None = None

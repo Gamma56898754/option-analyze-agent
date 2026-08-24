@@ -73,13 +73,14 @@ class AnalysisRunner:
         # 1. Get option chain
         # ==========================
 
-        option_chain_result = (
-            self.option_chain_tool.run(
-                ticker=request.ticker,
-                expiration_date=request.expiration,
-                force_refresh=request.force_refresh,
-                trace_id=trace_id,
-            )
+        (
+            option_chain_result,
+            data_quality_report,
+        ) = self.option_chain_tool.run_with_data_quality(
+            ticker=request.ticker,
+            expiration_date=request.expiration,
+            force_refresh=request.force_refresh,
+            trace_id=trace_id,
         )
 
 
@@ -92,7 +93,8 @@ class AnalysisRunner:
 
             ticker=request.ticker,
 
-            expiration=request.expiration
+            expiration=request.expiration,
+            data_quality_report=data_quality_report,
 
         )
 

@@ -1,249 +1,309 @@
 # Option Analyze Agent
 
-一个面向美股期权链分析的单 Agent 应用。它从 OptionCharts 获取期权链数据，使用确定性代码计算 GEX、DEX、OI 与 Max Pain，再由 LLM 将结果解释为自然语言回复。
+Option Analyze Agent is a local, single-user AI application for US equity
+option-chain analysis. It retrieves data from OptionCharts, calculates market
+metrics with deterministic Python code, and uses an LLM for controlled tool
+selection and natural-language explanation.
 
-当前版本为 **V3.0**：在 LangGraph V2 的状态图、记忆和缓存基础上，加入了原生 LLM Tool Calling、FastAPI 服务、Web/桌面界面、会话持久化和本地结构化 Trace。
+> For learning and research only. This project is not investment advice.
+> External market data can be delayed, incomplete, unavailable, or changed.
 
-> 仅供学习与研究使用，不构成投资建议。外部市场数据源可能延迟、不可用或发生结构变化。
+## Core engineering components
 
-## 功能
+| Area | What the application implements |
+| --- | --- |
+| Market-data pipeline | OptionCharts retrieval, expiration discovery, HTML parsing, normalized option-contract schemas, and typed failure handling. |
+| Deterministic analytics | GEX, DEX, OI, and Max Pain calculations in separate Python modules with structured results. |
+| AI orchestration | Native Tool Calling, LangGraph state and routing, natural-date resolution, session context, short-term memory, and summary memory. |
+| Backend and user access | FastAPI chat API, browser chat page, PyWebView desktop launcher, CLI, API contracts, and session identifiers. |
+| Storage and performance | SQLite checkpoints and conversation history, plus an in-memory five-minute option-chain cache. |
+| Reliability and diagnosis | Domain exceptions, controlled user-facing errors, JSONL traces, data-quality provenance, and offline regression tests. |
+| Extensibility | A reusable option Skill and an MCP adapter that exposes existing business logic without duplicating calculations. |
 
-- 抓取到期日信息和期权链 HTML，并解析为统一的 `OptionChainResult`。
-- 计算 GEX、DEX、OI 与 Max Pain；指标计算由确定性 Python 代码完成。
-- 使用 LLM 原生 Tool Calling 决定是否调用 `run_option_analysis`。
-- 对工具参数进行 JSON 解析、白名单校验和业务校验，模型不能直接调用数据源。
-- 识别部分自然语言日期，如“本周五”“下周五”“今天”“明天”。
-- 支持追问解释：当已有分析结果仍在五分钟新鲜期内，可直接基于现有上下文回答。
-- 使用 `ticker + expiration` 作为键，在进程内缓存期权链五分钟；用户明确要求更新时绕过缓存。
-- 使用 LangGraph SQLite Checkpointer 保存会话 State、短期记忆和摘要记忆。
-- 使用独立 SQLite 数据库存储网页侧会话列表、标题和完整展示历史。
-- 提供 FastAPI 接口、浏览器聊天页面与 PyWebView 本地桌面端。
-- 将一次请求中的决策、缓存、抓取、计算、回答和记忆步骤写入 JSONL Trace。
-- 将外部数据源超时、连接失败和非成功 HTTP 响应转换为用户可读提示，同时保留诊断日志。
+## Version progression
 
-## 架构
+| Version | Main result |
+| --- | --- |
+| V1 | End-to-end option-chain retrieval, parsing, deterministic metrics, and LLM explanation. |
+| V2 | LangGraph state, conditional routing, persistent memory, caching, and natural-language dates. |
+| V3 | Native Tool Calling, FastAPI, browser and desktop interfaces, traces, and persisted sessions. |
+| V4 | Option Skill, bounded Agent Loop, data quality and provenance, local MCP Server, and an offline evaluation suite. |
 
-```text
-Web / Desktop / CLI
-        |
-        v
- FastAPI POST /chat
-        |
-        | thread_id + trace_id
-        v
- LangGraph StateGraph
-        |
-        +--> agent_decide_node
-        |       |
-        |       +--> direct_answer_node
-        |       |
-        |       +--> execute_tool_call_node
-        |                 |
-        |                 v
-        |           OptionToolExecutor
-        |                 |
-        |                 v
-        |           AnalysisRunner
-        |                 |
-        |                 +--> OptionChainCache
-        |                 +--> OptionCharts Client -> Parser
-        |                 +--> GEX / DEX / OI / Max Pain Tools
-        |
-        +--> generate_answer_node
-        +--> update_short_term_memory_node
-        +--> summarize_conversation_node (when required)
-        |
-        v
- ChatResponse + SQLite conversation history + JSONL trace
-```
+## V4 highlights
 
-### 模块边界
+- Uses native LLM Tool Calling through one controlled public tool:
+  run_option_analysis.
+- Validates tool names, JSON arguments, tickers, expirations, analysis types,
+  and unexpected arguments before business logic is run.
+- Implements a bounded Agent Loop: after a tool observation, the Agent decides
+  whether to answer or make a distinct follow-up tool call.
+- Prevents runaway loops with a three-tool-step limit, duplicate-call
+  protection, a consecutive market-data-failure limit, and a LangGraph
+  recursion limit.
+- Loads an option-analysis Skill containing intents, freshness rules,
+  constraints, and answer requirements.
+- Keeps successful analysis context fresh for five minutes, so
+  explanation-only follow-ups can avoid unnecessary market-data calls.
+- Produces a DataQualityReport with source, fetch time, cache state, contract
+  count, and material warnings.
+- Provides a local stdio MCP Server and offline evaluation tests.
 
-```text
-agent/          LLM 调用、Tool Schema、Tool Executor、结果解释
-analysis/       GEX、DEX、OI、Max Pain 的确定性计算
-api/            FastAPI 路由、生命周期和 API Contracts
-cache/          五分钟 OptionChainResult 内存缓存
-core/           Runtime、Runner、校验、异常、Checkpoint 与 Trace
-data/           浏览器会话、OptionCharts Client、HTML Parser
-graph/          LangGraph State、Nodes、Routing 和 Graph 装配
-memory/         本地 SQLite 会话与 Checkpoint 数据库
-schemas/        跨层使用的数据结构
-tools/          期权链、市场时间、日期解析与指标工具
-web/            HTML、CSS、JavaScript 聊天界面
-test/           离线单元测试与集成/冒烟测试脚本
-desktop_app.py  PyWebView 桌面启动器
-```
+## Architecture
 
-## 核心请求流程
+    Web UI / Desktop App / CLI
+                |
+                v
+         FastAPI POST /chat
+                |
+                | thread_id + trace_id
+                v
+         LangGraph StateGraph
+                |
+                +--> initialize_agent_loop
+                |
+                +--> agent_decide_node
+                |       |
+                |       +--> direct_answer_node
+                |       |
+                |       +--> execute_tool_call_node
+                |                 |
+                |                 v
+                |           OptionToolExecutor
+                |                 |
+                |                 v
+                |           AnalysisRunner
+                |                 |
+                |                 +--> OptionChainCache
+                |                 +--> OptionCharts Client -> HTML Parser
+                |                 +--> GEX / DEX / OI / Max Pain Tools
+                |                 |
+                |                 v
+                |           tool observation
+                |                 |
+                |                 +--> agent_decide_node
+                |
+                +--> update_short_term_memory_node
+                +--> summarize_conversation_node (when needed)
+                |
+                v
+    ChatResponse + SQLite conversation history + JSONL trace
 
-1. 前端将用户输入和 `thread_id` 发送到 `POST /chat`。
-2. API 为本轮生成 `trace_id`，并调用带 SQLite Checkpointer 的 LangGraph。
-3. Agent 读取对话状态、摘要和分析新鲜度，决定直接回答或发起 Tool Call。
-4. 若调用工具，`OptionToolExecutor` 校验模型生成的 JSON 参数。
-5. `AnalysisRunner` 先查询五分钟缓存；未命中或强制刷新时再获取、解析期权链。
-6. 选择的指标工具计算结果，`ResultFormatter` 生成受控分析上下文。
-7. LLM 只能基于工具返回的上下文生成最终说明。
-8. 图更新短期记忆；达到阈值时摘要旧消息。网页历史另外写入 `conversations.db`。
+    MCP-compatible Host
+                |
+                v
+       Local stdio MCP Server
+                |
+                v
+      OptionToolExecutor (same business logic)
 
-## 环境要求
+The LLM is responsible for intent understanding, controlled tool selection, and
+explanation. Retrieval, validation, caching, calculations, persistence, and
+loop safety are handled by deterministic application code.
+
+## Project layout
+
+    agent/       LLM integration, tool schemas, execution, result formatting
+    analysis/    Deterministic GEX, DEX, OI, and Max Pain calculations
+    api/         FastAPI application and API contracts
+    cache/       In-memory option-chain cache
+    core/        Runtime, runner, validation, exceptions, checkpoints, tracing
+    data/        OptionCharts client and HTML parser
+    graph/       LangGraph state, nodes, routing, and graph assembly
+    mcp_server/  Local stdio MCP adapter
+    memory/      Local SQLite databases created at runtime
+    schemas/     Shared data structures and result schemas
+    skills/      LLM skill instructions
+    tools/       Market-data, date-resolution, and metric tools
+    web/         Browser chat UI assets
+    test/        Offline unit, integration, regression, and evaluation tests
+
+## Request flow
+
+1. A user sends text and a thread_id through the UI, CLI, or API.
+2. FastAPI creates a trace_id and invokes LangGraph with SQLite checkpointing.
+3. The graph initializes the per-turn loop, loads context, resolves natural
+   dates, and checks whether prior analysis is still fresh.
+4. The Agent chooses a direct answer or run_option_analysis.
+5. OptionToolExecutor validates LLM JSON and creates an AnalysisRequest.
+6. AnalysisRunner checks the cache. On a miss or explicit refresh, it retrieves
+   and parses source data, then runs selected deterministic metrics.
+7. The formatted analysis and data-quality information return as a tool
+   observation. The Agent decides whether more distinct data is needed or
+   produces an answer.
+8. The graph updates memory and summarizes older messages when appropriate.
+   FastAPI persists display history and returns the response.
+
+## Requirements and installation
 
 - Python 3.12+
-- DeepSeek API Key（通过 OpenAI Python SDK 兼容接口调用）
-- Playwright Chromium 浏览器二进制
+- A DeepSeek API key compatible with the OpenAI Python SDK interface
+- Playwright Chromium for live OptionCharts retrieval
 
-安装：
+    python -m venv venv
+    .\venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+    playwright install chromium
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-playwright install chromium
-```
+Create a .env file in the project root:
 
-在项目根目录创建 `.env`：
+    DEEPSEEK_API_KEY=your_api_key_here
 
-```env
-DEEPSEEK_API_KEY=your_api_key_here
-```
+Do not commit .env, virtual environments, logs, or local SQLite databases.
 
-不要提交 `.env`、`venv/`、`logs/` 或本地 SQLite 数据库。
+## Run
 
-## 启动
+### Desktop app
 
-### 桌面端（推荐）
+    python -m desktop_app
 
-```powershell
-python -m desktop_app
-```
+### Browser and API mode
 
-桌面端会启动本地 FastAPI 服务并打开 PyWebView 窗口。
+    uvicorn api.app:app
 
-### 浏览器 / API 开发模式
+Open http://127.0.0.1:8000/. API documentation is at
+http://127.0.0.1:8000/docs.
 
-```powershell
-uvicorn api.app:app
-```
+### CLI
 
-打开：
+    python -m run_graph_agent
 
-```text
-http://127.0.0.1:8000/
-```
+Use exit, quit, or 退出 to stop the CLI.
 
-API 文档：
+### Local MCP Server
 
-```text
-http://127.0.0.1:8000/docs
-```
+    python -m mcp_server.option_server
 
-### CLI 版本
+The MCP Server is a stdio process for MCP-compatible hosts, not an interactive
+terminal program. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for its contract
+and Cursor configuration.
 
-```powershell
-python -m run_graph_agent
-```
+## Example requests
 
-输入 `exit`、`quit` 或 `退出` 可结束 CLI。
+    Analyze TSLA GEX and DEX for 2026-08-28
+    Analyze Tesla for next Friday
+    Explain the previous GEX result in more detail
+    Refresh the data and analyze it again
 
-## 示例请求
+## Data freshness, quality, and observability
 
-```text
-分析 TSLA 2026-08-21 的 GEX 和 DEX
-分析特斯拉下周五的信息
-再帮我看一下 OI 并分析
-再详细解释一下
-更新一下数据，再次分析
-```
+- Option-chain cache TTL: five minutes, keyed by ticker + expiration.
+- Cache hit reuses parsed data; a cache miss retrieves it; explicit refresh
+  bypasses the cache.
+- Analysis context older than five minutes is not presented as current market
+  data to the Agent.
+- Quality output contains source, fetch timestamp, cache state, contract count,
+  and warnings.
+- Checkpoints: memory/option_agent_checkpoints.db
+- Browser history: memory/conversations.db
+- Request trace: logs/option_agent.jsonl
 
-## 状态、记忆与缓存
+Common trace events include chat_started, agent_decision_completed,
+tool_execution_completed, option_chain_cache_hit,
+option_chain_fetch_completed, analysis_calculation_completed, and
+agent_loop_terminated.
 
-### LangGraph 会话状态
+## Tests
 
-LangGraph Checkpoint 默认保存在：
+    python -m test.test_evaluation_suite
+    python -m test.test_mcp_option_service
+    pytest test/test_mcp_server_integration.py
 
-```text
-memory/option_agent_checkpoints.db
-```
+See [docs/EVALUATION.md](docs/EVALUATION.md) for V4 acceptance criteria.
 
-同一 `thread_id` 可以恢复最近的分析上下文、短期对话历史、运行摘要和最近一次成功请求。
+## Current boundaries
 
-旧消息达到摘要条件时，系统会压缩历史并保留最近原始消息，减少后续 LLM 上下文长度。
+- This is a local, single-user application. Its in-memory cache, SQLite
+  storage, JSONL tracing, and serialized graph execution are not multi-user
+  production infrastructure.
+- OptionCharts is an external dependency and may be unavailable, rate-limited,
+  verification-protected, or structurally changed.
+- The Agent Loop supports multiple controlled attempts, but the model currently
+  has one public aggregate business tool: run_option_analysis.
+- Authentication, tenant isolation, Redis, PostgreSQL, centralized monitoring,
+  CI/CD, cloud deployment, RAG, and multi-agent architecture are not included.
 
-### 网页会话历史
+For multi-user production deployment, add authentication, an approved data
+source, PostgreSQL, Redis, centralized observability, CI, and containers.
 
-网页侧的会话标题与完整展示消息保存在：
+---
 
-```text
-memory/conversations.db
-```
+# 中文说明
 
-它服务于左侧会话列表和历史展示；并不意味着所有历史消息都会原样发送给 LLM。
+## 项目简介
 
-### 期权链缓存与新鲜度
+Option Analyze Agent 是一个本地、单用户的美股期权链分析 AI 应用。它从
+OptionCharts 获取期权链数据，使用确定性 Python 代码计算 GEX、DEX、持仓量
+（OI）与 Max Pain，再由 LLM 在受控范围内决定是否需要取数并解释结果。
 
-- 缓存键：`ticker + expiration`
-- TTL：5 分钟
-- `cache hit`：直接复用已解析的期权链，不再请求或解析 HTML。
-- `cache miss`：重新抓取并解析数据。
-- `cache bypass`：用户明确要求刷新时忽略缓存。
-- 分析上下文超过五分钟后，系统不会把旧市场数据当作当前数据直接回答。
+> 本项目仅供学习与研究使用，不构成投资建议。市场数据可能延迟、不完整、
+> 不可用，或因数据源结构变化而失效。
 
-缓存仅存在内存中，Python 进程退出后自动清空。
+## 主要工程内容
 
-## Trace 与故障诊断
+| 模块 | 当前实现内容 |
+| --- | --- |
+| 市场数据链路 | OptionCharts 获取、可用到期日发现、HTML 解析、统一期权合约结构和类型化异常。 |
+| 确定性分析 | GEX、DEX、OI、Max Pain 分别由 Python 模块计算，并输出结构化结果。 |
+| AI 编排 | Tool Calling、LangGraph 状态和路由、自然语言日期、会话上下文、短期记忆和摘要记忆。 |
+| 后端与用户入口 | FastAPI 聊天 API、浏览器聊天页面、PyWebView 桌面启动器、CLI、API 合同和会话标识。 |
+| 存储与性能 | SQLite 检查点和会话历史，以及五分钟内存期权链缓存。 |
+| 可靠性与诊断 | 领域异常、受控用户错误、JSONL Trace、数据质量溯源和离线回归测试。 |
+| 可扩展性 | 可复用的 Option Skill，以及不重复业务计算的 MCP 适配层。 |
 
-本地 Trace 写入：
+## 版本演进
 
-```text
-logs/option_agent.jsonl
-```
+| 版本 | 主要成果 |
+| --- | --- |
+| V1 | 期权链抓取、解析、确定性指标计算和 LLM 分析闭环。 |
+| V2 | LangGraph 状态、条件路由、持久化记忆、缓存和自然语言日期。 |
+| V3 | 原生 Tool Calling、FastAPI、网页与桌面端、Trace 和会话持久化。 |
+| V4 | Option Skill、有边界的 Agent Loop、数据质量与溯源、本地 MCP Server 和离线评估套件。 |
 
-每次聊天请求有独立 `trace_id`。常见事件包括：
+## 当前 V4 功能
 
-- `chat_started` / `chat_completed`
-- `agent_decision_started` / `agent_decision_completed`
-- `option_chain_cache_hit` / `option_chain_cache_miss` / `option_chain_cache_bypassed`
-- `option_chain_fetch_started` / `option_chain_fetch_completed`
-- `analysis_calculation_started` / `analysis_calculation_completed`
-- `answer_generation_started` / `answer_generation_completed`
-- `short_term_memory_updated`
-- `conversation_summary_completed`
-- `chat_data_source_unavailable`
+- 通过原生 Tool Calling 调用受控的 run_option_analysis 工具。
+- 校验工具名、JSON 参数、Ticker、到期日、指标类型和多余字段。
+- 支持 Agent Loop：工具结果回到 Agent 后，Agent 判断直接回答或继续不同调用。
+- 通过最大工具步骤、重复调用拦截、连续数据源失败上限和图递归上限避免失控。
+- 通过 Option Analysis Skill 提供支持意图、数据新鲜度和回答约束。
+- 成功分析后的上下文在五分钟内可用于追问解释，避免不必要取数。
+- 输出数据来源、抓取时间、缓存状态、合约数量和数据质量警告。
+- 提供本地 stdio MCP Server 和离线评估测试。
 
-查看最近日志：
+## 快速启动
 
-```powershell
-Get-Content .\logs\option_agent.jsonl -Tail 50
-```
+    python -m venv venv
+    .\venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+    playwright install chromium
 
-## 测试
+在根目录创建 .env：
 
-以下测试不需要 DeepSeek API、浏览器 Cookie 或外部期权链请求：
+    DEEPSEEK_API_KEY=your_api_key_here
 
-```powershell
-python -m test.test_option_chain_cache
-python -m test.test_option_chain_tool_cache
-python -m test.test_graph_routing
-python -m test.test_natural_date_resolver
-python -m test.test_optionchart_client_errors
-```
+启动桌面端：
 
-运行语法检查：
+    python -m desktop_app
 
-```powershell
-python -m py_compile core\exceptions.py data\optionchart_client.py core\trace.py api\app.py
-```
+启动浏览器/API 开发模式：
 
-项目中另有需要真实 API、浏览器或市场数据源的集成测试；运行它们会使用本机配置的外部服务。
+    uvicorn api.app:app
 
-## 当前限制与后续方向
+启动 MCP Server：
 
-- 当前是单用户本地应用；`graph_lock` 会串行执行聊天请求。
-- SQLite、内存缓存和 JSONL Trace 适合学习与本地运行，不适合多人生产环境。
-- OptionCharts 是外部依赖，可能出现验证码、限流、HTTP 错误或 HTML 结构变化。
-- 项目尚未实现用户认证、多租户隔离、Redis、PostgreSQL、集中监控或重试策略。
-- 当前只有一个聚合分析 Tool；未实现 MCP、Skills、多 Agent 或 RAG。
-- 本项目未将实时市场分析向量化为 RAG 记忆，避免旧行情被检索后误认为实时数据。
+    python -m mcp_server.option_server
 
-面向公司内部多用户部署时，下一步应是：中心化 FastAPI 服务、认证与权限、PostgreSQL 会话存储、Redis 缓存、受授权的数据源和集中可观测性。
+MCP Server 面向 Cursor 等 MCP Host，不是交互式终端程序。详细配置请见
+[docs/MCP_SERVER.md](docs/MCP_SERVER.md)。
+
+## 常用测试
+
+    python -m test.test_evaluation_suite
+    python -m test.test_mcp_option_service
+    pytest test/test_mcp_server_integration.py
+
+## 当前边界
+
+该项目适合本地单用户学习和演示，尚未具备多人生产部署所需的认证、多租户、
+PostgreSQL、Redis、集中监控、CI/CD、容器化部署、RAG 和多 Agent 架构。
 

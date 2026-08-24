@@ -3,7 +3,10 @@ from graph.state import OptionAgentState
 from langgraph.types import Overwrite
 from tools.market_time_tool import MarketTimeTool
 from tools.natural_date_resolver import NaturalDateResolver
-from core.exceptions import ExpirationNotFoundError
+from core.exceptions import (
+    ExpirationNotFoundError,
+    MarketDataUnavailableError,
+)
 from schemas.analysis_request import AnalysisRequest
 import json
 import time
@@ -163,6 +166,10 @@ class OptionGraphNodes:
                     else None
                 ),
                 has_fresh_analysis=has_fresh_analysis,
+                tool_observations=state.get(
+                    "tool_observations",
+                    [],
+                ),
             )
         except Exception as exc:
             self._trace(
@@ -228,6 +235,80 @@ class OptionGraphNodes:
             "agent_decision": decision
         }
 
+    @staticmethod
+    def _tool_call_signature(
+        decision: dict[str, str],
+    ) -> str:
+        """Build a stable signature for duplicate-call protection."""
+
+        tool_name = decision["tool_name"]
+
+        try:
+            arguments = json.loads(
+                decision["arguments_json"]
+            )
+        except json.JSONDecodeError:
+            # Let the executor produce the existing validation error.
+            return (
+                f"{tool_name}:"
+                f"{decision['arguments_json']}"
+            )
+
+        if not isinstance(arguments, dict):
+            return (
+                f"{tool_name}:"
+                f"{decision['arguments_json']}"
+            )
+
+        ticker = arguments.get("ticker")
+
+        if isinstance(ticker, str):
+            arguments["ticker"] = ticker.upper()
+
+        return (
+            f"{tool_name}:"
+            f"{json.dumps(arguments, sort_keys=True, separators=(',', ':'))}"
+        )
+
+    def initialize_agent_loop_node(
+        self,
+        state: OptionAgentState,
+    ) -> dict:
+        """Reset per-turn loop data while retaining conversation memory."""
+
+        return {
+            "tool_observations": Overwrite([]),
+            "tool_call_signatures": Overwrite([]),
+            "tool_step_count": 0,
+            "max_tool_steps": state.get(
+                "max_tool_steps",
+                3,
+            ),
+            "consecutive_tool_failure_count": 0,
+            "last_failed_tool_name": None,
+            "max_consecutive_tool_failures": state.get(
+                "max_consecutive_tool_failures",
+                2,
+            ),
+            "loop_termination_reason": None,
+        }
+
+    @staticmethod
+    def _tool_observation(
+        decision: dict[str, str],
+        status: str,
+        content: str,
+    ) -> dict[str, object]:
+        """Create the data needed to replay a tool result to the LLM."""
+
+        return {
+            "tool_call_id": decision.get("tool_call_id", ""),
+            "tool_name": decision["tool_name"],
+            "arguments_json": decision["arguments_json"],
+            "status": status,
+            "content": content,
+        }
+
     def execute_tool_call_node(
         self,
         state: OptionAgentState,
@@ -243,6 +324,38 @@ class OptionGraphNodes:
             raise ValueError(
                 "Expected a tool_call decision"
             )
+
+        step_count = state.get("tool_step_count", 0) + 1
+        max_steps = state.get("max_tool_steps", 3)
+
+        if step_count > max_steps:
+            return {
+                "tool_step_count": step_count,
+                "loop_termination_reason": "max_tool_steps",
+            }
+
+        signature = self._tool_call_signature(decision)
+
+        if signature in state.get("tool_call_signatures", []):
+            self._trace(
+                state,
+                "tool_execution_blocked",
+                tool_name=decision["tool_name"],
+                reason="duplicate_tool_call",
+                step_count=step_count,
+            )
+
+            return {
+                "tool_step_count": step_count,
+                "tool_observations": [
+                    self._tool_observation(
+                        decision,
+                        "duplicate",
+                        "This tool call was not executed because identical "
+                        "arguments were already used in this turn.",
+                    )
+                ],
+            }
 
         started_at = time.perf_counter()
 
@@ -298,6 +411,65 @@ class OptionGraphNodes:
                 ),
             }
 
+        except MarketDataUnavailableError as exc:
+
+            if (
+                state.get("last_failed_tool_name")
+                == decision["tool_name"]
+            ):
+                failure_count = (
+                    state.get(
+                        "consecutive_tool_failure_count",
+                        0,
+                    )
+                    + 1
+                )
+            else:
+                failure_count = 1
+
+            failure_limit = state.get(
+                "max_consecutive_tool_failures",
+                2,
+            )
+
+            self._trace(
+                state,
+                "tool_execution_failed",
+                tool_name=decision["tool_name"],
+                error_type=type(exc).__name__,
+                reason="market_data_unavailable",
+                failure_count=failure_count,
+                failure_limit=failure_limit,
+                duration_ms=round(
+                    (time.perf_counter() - started_at) * 1000,
+                    2,
+                ),
+            )
+
+            result = {
+                "tool_step_count": step_count,
+                "consecutive_tool_failure_count": failure_count,
+                "last_failed_tool_name": decision["tool_name"],
+                "tool_observations": [
+                    self._tool_observation(
+                        decision,
+                        "error",
+                        "Market data is temporarily unavailable "
+                        f"from {exc.source} during {exc.operation}.",
+                    )
+                ],
+                "validation_error": None,
+                "analysis_error": None,
+                "available_expirations": [],
+            }
+
+            if failure_count >= failure_limit:
+                result["loop_termination_reason"] = (
+                    "max_consecutive_tool_failures"
+                )
+
+            return result
+
         except ValueError as exc:
 
             self._trace(
@@ -348,12 +520,52 @@ class OptionGraphNodes:
 
         return {
             **execution_result,
+            "tool_step_count": step_count,
+            "consecutive_tool_failure_count": 0,
+            "last_failed_tool_name": None,
+            "tool_call_signatures": [signature],
+            "tool_observations": [
+                self._tool_observation(
+                    decision,
+                    "success",
+                    execution_result["analysis_context"],
+                )
+            ],
             "validation_error": None,
             "analysis_error": None,
             "available_expirations": [],
             "last_successful_at": datetime.now(
                 timezone.utc
             ).isoformat(),
+        }
+
+    def loop_terminated_node(
+        self,
+        state: OptionAgentState,
+    ) -> dict:
+        """Return a controlled answer when the loop safety guard stops it."""
+
+        reason = state.get("loop_termination_reason")
+
+        if reason == "max_consecutive_tool_failures":
+            answer = (
+                "期权行情数据源连续不可用，本轮已停止继续请求。"
+                "请稍后重试。"
+            )
+        else:
+            answer = (
+                "本轮工具调用已达到安全步骤上限，未继续请求更多市场数据。"
+            )
+
+        self._trace(
+            state,
+            "agent_loop_terminated",
+            reason=reason,
+            step_count=state.get("tool_step_count", 0),
+        )
+
+        return {
+            "final_answer": answer,
         }
 
     def direct_answer_node(
@@ -621,10 +833,13 @@ class OptionGraphNodes:
 
         if (
             request is not None
-            and state.get(
-                "agent_decision",
-                {},
-            ).get("decision_type") == "tool_call"
+            and any(
+                observation.get("status") == "success"
+                for observation in state.get(
+                    "tool_observations",
+                    [],
+                )
+            )
             and not state.get("analysis_error")
             and not state.get("validation_error")
         ):

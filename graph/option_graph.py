@@ -29,6 +29,11 @@ def build_option_graph(
     )
 
     builder.add_node(
+        "initialize_agent_loop",
+        nodes.initialize_agent_loop_node,
+    )
+
+    builder.add_node(
         "agent_decide",
         nodes.agent_decide_node
     )
@@ -44,8 +49,8 @@ def build_option_graph(
     )
 
     builder.add_node(
-        "generate_answer",
-        nodes.generate_answer_node
+        "loop_terminated",
+        nodes.loop_terminated_node,
     )
 
     builder.add_node(
@@ -70,7 +75,12 @@ def build_option_graph(
 
     builder.add_edge(
         START,
-        "agent_decide"
+        "initialize_agent_loop"
+    )
+
+    builder.add_edge(
+        "initialize_agent_loop",
+        "agent_decide",
     )
 
     builder.add_conditional_edges(
@@ -86,20 +96,21 @@ def build_option_graph(
         "execute_tool_call",
         route_after_tool_execution,
         {
-            "success": "generate_answer",
+            "continue": "agent_decide",
             "invalid": "validation_failed",
             "failed": "analysis_failed",
+            "loop_terminated": "loop_terminated",
         }
-    )
-
-    builder.add_edge(
-        "generate_answer",
-        "update_short_term_memory"
     )
 
     builder.add_edge(
         "direct_answer",
         "update_short_term_memory"
+    )
+
+    builder.add_edge(
+        "loop_terminated",
+        "update_short_term_memory",
     )
 
     builder.add_edge(
